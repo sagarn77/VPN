@@ -1,57 +1,61 @@
-name: PotatoVPN IP Capture
+name: Android VPN IP Capture
 
 on:
-  workflow_dispatch: {}
+  push:
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
-  run-emulator-and-capture:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v3
 
-      - name: Setup JDK 11
-        uses: actions/setup-java@v4
+      - name: Set up JDK
+        uses: actions/setup-java@v3
         with:
           distribution: temurin
-          java-version: '11'
+          java-version: 11
 
-      - name: Start Android emulator (API 33, x86_64)
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Start emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 33
+          api-level: 30
           target: google_apis
           arch: x86_64
-          emulator-options: -no-window -gpu swiftshader_indirect
+          profile: pixel_4
           force-avd-creation: true
-          script: |
-            echo "emulator started"
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
 
-      - name: Wait for device
+      - name: Wait for emulator
         run: |
-          adb wait-for-device
+          adb start-server
+          for i in {1..24}; do
+            adb devices | grep "emulator-5554.*device" && break
+            echo "Waiting for emulator..."
+            sleep 5
+          done
           adb devices
 
-      - name: Install APK (ensure potato.apk exists in repo root)
+      - name: Install APK
         run: |
-          if [ ! -f "./potato.apk" ]; then
-            echo "ERROR: potato.apk not found at repo root. Upload potato.apk or change workflow path." >&2
+          if [ -f "./potato.apk" ]; then
+            echo "Found potato.apk, installing..."
+            adb install -r ./potato.apk || (echo "adb install failed"; adb logcat -d | tail -n 200; exit 1)
+          else
+            echo "ERROR: potato.apk not found in repo root"
             exit 1
           fi
-          adb install -r ./potato.apk
 
-      - name: Give app a moment to settle
-        run: sleep 3
-
-      - name: Run capture script
-        env:
-          ADB_PATH: adb
+      - name: Dump UI for debug
         run: |
-          python3 --version
-          python3 tools/potato_adb_capture.py
+          adb shell uiautomator dump /sdcard/uidump.xml || echo "dump failed"
+          adb pull /sdcard/uidump.xml || echo "pull failed"
+          ls -la
+          cat uidump.xml || echo "no dump file"
 
-      - name: Upload result artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: potato_vpn_ips
-          path: potato_vpn_ips.csv
+      - name: Run Python script
+        run: python3 tools/potato_adb_capture.py
