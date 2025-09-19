@@ -1,74 +1,15 @@
-name: Android VPN IP Capture
-
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up JDK
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Start emulator
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 29
-          target: default
-          arch: x86_64
-          profile: Nexus 6
-          force-avd-creation: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          disable-animations: true
-          script: echo "✅ Emulator booted successfully"
-
-      - name: Wait for emulator
-        run: |
-          adb start-server
-          for i in {1..24}; do
-            adb devices | grep "emulator-5554.*device" && break
-            echo "Waiting for emulator..."
-            sleep 5
-          done
-          adb devices
-
-      - name: Install APK
-        run: |
-          if [ -f "./potato.apk" ]; then
-            echo "Found potato.apk, installing..."
-            adb install -r ./potato.apk || (echo "❌ adb install failed"; adb logcat -d | tail -n 200; exit 1)
-          else
-            echo "❌ ERROR: potato.apk not found in repo root"
-            ls -la
-            exit 1
-          fi
-
-      - name: Dump UI for debug
-        run: |
-          adb shell uiautomator dump /sdcard/uidump.xml || echo "dump failed"
-          adb pull /sdcard/uidump.xml || echo "pull failed"
-          ls -la
-          head -n 50 uidump.xml || echo "no dump file"
-
-      - name: Run Python script
-        run: python3 tools/potato_adb_capture.py
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: vpn-debug
-          path: |
-            uidump.xml
-            *.txt
-            *.log
+- name: Wait for emulator to fully boot
+  run: |
+    adb start-server
+    echo "Waiting for emulator..."
+    # wait up to 3 minutes
+    for i in {1..36}; do
+      state=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+      if [ "$state" = "1" ]; then
+        echo "✅ Emulator booted"
+        break
+      fi
+      echo "Waiting... $i/36"
+      sleep 5
+    done
+    adb devices -l
